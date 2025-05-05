@@ -4,6 +4,8 @@
 
 #include "Modules/ModuleManager.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogSpatialGrid, Log, All);
+
 class FSpatialGridModule : public IModuleInterface
 {
 public:
@@ -12,3 +14,4 @@ public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 };
+
