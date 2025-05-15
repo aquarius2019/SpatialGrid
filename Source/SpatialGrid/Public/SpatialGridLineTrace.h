@@ -1,41 +1,47 @@
 ﻿#pragma once
 
-#include <optional>
-
 #include "Grid.h"
 #include "SpatialGridQueryResult.h"
 #include "SpatialGridUtils.h"
 
 namespace SpatialGrid
 {
-	template<typename GridSemantics>
+	template<typename Semantics>
 	struct TLineTrace
 	{
-		using Grid    = TSpatialGrid<GridSemantics>;
+		using Grid    = TSpatialGrid<Semantics>;
 		using Cell    = typename Grid::Cell;
 		using Element = typename Grid::Element;
 		using CellSet = ankerl::unordered_dense::set<CellIndex>;
 		
-		TLineTrace(const FVector& start, const FVector& end_)
-		: m_start(start)
-		, m_end(end_)
-		, m_dir((end_ - start).GetSafeNormal())
-		, m_inv_dir(m_dir.Reciprocal())
-		, m_delta(
-			FMath::Abs(GridSemantics::CellSize * m_inv_dir.X),
-			FMath::Abs(GridSemantics::CellSize * m_inv_dir.Y),
-			FMath::Abs(GridSemantics::CellSize * m_inv_dir.Z))
-		, m_step(m_dir.X > 0 ? 1 : -1, m_dir.Y > 0 ? 1 : -1, m_dir.Z > 0 ? 1 : -1) {}
+		TLineTrace(const FVector& start, const FVector& end)
+		: Start(start)
+		, End(end)
+		, Dir((end - start).GetSafeNormal())
+		, InvDir(Dir.Reciprocal())
+		, Delta(
+			FMath::Abs(Semantics::CellSize * InvDir.X),
+			FMath::Abs(Semantics::CellSize * InvDir.Y),
+			FMath::Abs(Semantics::CellSize * InvDir.Z))
+		, Step(Dir.X > 0 ? 1 : -1, Dir.Y > 0 ? 1 : -1, Dir.Z > 0 ? 1 : -1) {}
 		
 		TLineTrace(const FVector& start, const FVector& direction, const double length)
-		: TLineTrace(start, start + (direction * length)) {}
+		: Start(start)
+		, End(start + (direction * length))
+		, Dir(direction)
+		, InvDir(Dir.Reciprocal())
+		, Delta(
+			FMath::Abs(Semantics::CellSize * InvDir.X),
+			FMath::Abs(Semantics::CellSize * InvDir.Y),
+			FMath::Abs(Semantics::CellSize * InvDir.Z))
+		, Step(Dir.X > 0 ? 1 : -1, Dir.Y > 0 ? 1 : -1, Dir.Z > 0 ? 1 : -1) {}
 		
 		template<typename IterFunc>
-		void Multi(const TSpatialGrid<GridSemantics>& grid, IterFunc&& func) const
+		void Multi(const TSpatialGrid<Semantics>& grid, IterFunc&& func) const
 		{
 			// check that line intersects current grid bounds
 			FVector hit_point;
-			if (!LineBoxHitPoint(grid.GetBounds(), m_start, m_end, m_dir, m_inv_dir, hit_point))
+			if (!LineBoxHitPoint(grid.GetBounds(), Start, End, Dir, InvDir, hit_point))
 			{
 				return;
 			}
@@ -43,29 +49,30 @@ namespace SpatialGrid
 			// TODO: figure out a good algorithm for reserving memory
 			CellSet   checked_cells(100);
 			CellIndex current_cell = grid.LocationToCoordinates(hit_point);
-			
 			const FVector start_cell_origin = grid.CellCenter(current_cell);
-			const FVector t1 = ((start_cell_origin - cell_extent) - hit_point) * m_inv_dir;
-			const FVector t2 = ((start_cell_origin + cell_extent) - hit_point) * m_inv_dir;
-			const CellIndex end_cell = grid.LocationToCoordinates(m_end);
+			const FVector t1 = ((start_cell_origin - cell_extent) - hit_point) * InvDir;
+			const FVector t2 = ((start_cell_origin + cell_extent) - hit_point) * InvDir;
+			const CellIndex end_cell = grid.LocationToCoordinates(End);
 
 			FVector t_max = FVector::Max(t1, t2);
 
-			if (hit_point != m_start)
+			if (hit_point != Start)
 			{
-				progress(current_cell, t_max);
+				Progress(current_cell, t_max);
 			}
+
+			const int32 max_steps = CalculateMaxSteps(hit_point);
 			
-			while(true)
+			for (int32 step = 0; step < max_steps; ++step)
 			{
-				check_cells(grid, current_cell, checked_cells, std::forward<IterFunc>(func));
+				CheckAll(grid, current_cell, checked_cells, std::forward<IterFunc>(func));
 
 				if (current_cell == end_cell || !grid.IsCellWithinBounds(current_cell))
 				{
 					break;
 				}
 
-				progress(current_cell, t_max);
+				Progress(current_cell, t_max);
 			}
 		}
 		
@@ -75,7 +82,8 @@ namespace SpatialGrid
 			
 			// check that line intersects current grid bounds
 			FVector hit_point;
-			if (LineBoxHitPoint(grid.GetBounds(), m_start, m_end, m_dir, m_inv_dir, hit_point) == false)
+			
+			if (!LineBoxHitPoint(grid.GetBounds(), Start, End, Dir, InvDir, hit_point))
 			{
 				return result;
 			}
@@ -83,128 +91,138 @@ namespace SpatialGrid
 			// TODO: figure out a good algorithm for reserving memory
 			CellSet   checked_cells(100);
 			CellIndex current_cell = grid.LocationToCoordinates(hit_point);
-			
 			const FVector start_cell_origin = grid.CellCenter(current_cell);
-			const FVector t1 = ((start_cell_origin - cell_extent) - hit_point) * m_inv_dir;
-			const FVector t2 = ((start_cell_origin + cell_extent) - hit_point) * m_inv_dir;
-			const CellIndex end_cell = grid.LocationToCoordinates(m_end);
+			const FVector t1 = ((start_cell_origin - cell_extent) - hit_point) * InvDir;
+			const FVector t2 = ((start_cell_origin + cell_extent) - hit_point) * InvDir;
+			const CellIndex end_cell = grid.LocationToCoordinates(End);
 
 			FVector t_max = FVector::Max(t1, t2);
 
-			if (hit_point != m_start)
+			if (hit_point != Start)
 			{
-				progress(current_cell, t_max);
+				Progress(current_cell, t_max);
 			}
+
+			const int32 max_steps = CalculateMaxSteps(hit_point);
 			
-			// Maybe use a for loop to code more defensively
-			// Should be able to estimate the number of cells to check from the length of the trace
-			while(true) 
+			for(int32 steps = 0; steps < max_steps; ++steps) 
 			{
-				check_closest(grid, current_cell, checked_cells, result);
+				CheckClosest(grid, current_cell, checked_cells, result);
 
 				if (result.BlockingHit || current_cell == end_cell || !grid.IsCellWithinBounds(current_cell))
 				{
 					break;
 				}
 
-				progress(current_cell, t_max);
+				Progress(current_cell, t_max);
 			}
 	
 			return result;
 		}
 		
 	private:
-		FVector m_start;
-		FVector m_end;
-		FVector m_dir;
-		FVector m_inv_dir;
-		FVector m_delta;
-		CellIndex m_step;
-		static constexpr FVector cell_extent = SpatialGrid::CellExtent<GridSemantics>();
+		FVector Start;
+		FVector End;
+		FVector Dir;
+		FVector InvDir;
+		FVector Delta;
+		CellIndex Step;
+		static constexpr FVector cell_extent = SpatialGrid::CellExtent<Semantics>();
 
-		void progress(CellIndex& current_cell, FVector& t_max) const
+		int32 CalculateMaxSteps(const FVector& hit_point) const
+		{
+			const FVector delta = End - hit_point;
+			
+			return
+			FMath::CeilToInt(FMath::Abs(delta.X) / Semantics::CellSize) + 
+			FMath::CeilToInt(FMath::Abs(delta.Y) / Semantics::CellSize) +
+			FMath::CeilToInt(FMath::Abs(delta.Z) / Semantics::CellSize) + 1;	
+		}
+		
+		void Progress(CellIndex& current_cell, FVector& t_max) const
 		{
 			// Determine which axis is crossed next
 			if (t_max.X < t_max.Y && t_max.X < t_max.Z)
 			{
-				current_cell.X += m_step.X;
-				t_max.X += m_delta.X;
+				current_cell.X += Step.X;
+				t_max.X += Delta.X;
 			}
 			else if (t_max.Y < t_max.Z)
 			{
-				current_cell.Y += m_step.Y;
-				t_max.Y += m_delta.Y;
+				current_cell.Y += Step.Y;
+				t_max.Y += Delta.Y;
 			}
 			else
 			{
-				current_cell.Z += m_step.Z;
-				t_max.Z += m_delta.Z;
+				current_cell.Z += Step.Z;
+				t_max.Z += Delta.Z;
 			}
 		}
 		
 		template<typename F>
-		void check_cells(const Grid& grid, const CellIndex& offset, CellSet& checked_cells, F&& func) const
+		void CheckAll(const Grid& grid, const CellIndex& offset, CellSet& checked_cells, F&& func) const
 		{
+			auto scan_element = [this, func = std::forward<F>(func)](const ElementId& id, const Element& element)
+			{
+				if (FVector hit_loc; Semantics::LineHitPoint(element.Data, Start, End, Dir, InvDir, hit_loc))
+				{
+					func(id, element, hit_loc);
+				}
+			};
+			
+			auto scan_cell = [this, &grid, &scan_element](const Cell& cell)
+			{
+				if (cell.HasElements() && LineIntersectsBox(cell.GetBounds(), Start, InvDir))
+				{
+					cell.ForEachElement(grid, scan_element);
+				}
+			};
+			
 			// check (3x3x3) cube around current cell (including current cell)
 			CellRange(1).ForEach([&](const CellIndex& index)
 			{
-				const CellIndex coords = index + offset;
-				
-				if(checked_cells.contains(coords)) { return; }
-				
-				grid.GetCell(coords, [this, grid, &func](const Cell& cell)
+				if(const CellIndex coords = index + offset; !checked_cells.contains(coords))
 				{
-					if (cell.HasElements() && LineIntersectsBox(cell.GetBounds(), m_start, m_inv_dir))
-					{
-						cell.ForEachElement(grid, [&](auto&, const Element& element)
-						{
-							if (std::optional<FVector> hit_loc =
-							GridSemantics::LineHitPoint(element, m_start, m_end, m_dir, m_inv_dir))
-							{
-								func(element, *hit_loc);
-							}
-						});
-					}
-				});
-				
-				checked_cells.insert(coords);
+					grid.GetCell(coords, scan_cell);
+					checked_cells.insert(coords);
+				}
 			});
 		}
 
-		void check_closest(const Grid& grid, const CellIndex& offset, CellSet& checked_cells, QueryResult& closest) const
+		void CheckClosest(const Grid& grid, const CellIndex& offset, CellSet& checked_cells, QueryResult& closest) const
 		{
-			using GridCell = typename TSpatialGrid<GridSemantics>::Cell;
-			using ElementType = typename GridSemantics::ElementData;
+			closest.Location = End;
+			
+			auto scan_element = [this, &closest](const ElementId id, const Element& element)
+			{
+				if (FVector hit_loc; Semantics::LineHitPoint(element.Data, Start, End, Dir, InvDir, hit_loc))
+				{
+					if (!closest.BlockingHit || FVector::DistSquared(Start, hit_loc) < FVector::DistSquared(Start, closest.ImpactPoint))
+					{
+						closest.BlockingHit = true;
+						closest.Location = closest.ImpactPoint = hit_loc;
+						closest.ElementId = id;
+					}
+				}
+			};
+			
+			auto scan_cell = [this, &grid, &scan_element](const Cell& cell)
+			{
+				if (cell.HasElements() && LineIntersectsBox(cell.GetBounds(), Start, InvDir))
+				{
+					cell.ForEachElement(grid, scan_element);
+				}
+			};
 			
 			// check (3x3x3) cube around current cell (including current cell)
-			CellRange(1).ForEach(offset, [&](CellIndex coords)
+			CellRange(1).ForEach(offset, [&](const CellIndex index)
 			{
-				if(checked_cells.contains(coords)) { return; }
-				
-				const GridCell* cell = grid.GetCell(coords);
-				
-				if (cell && cell->HasElements() && LineIntersectsBox(cell->GetBounds(), m_start, m_inv_dir))
+				if(const CellIndex coords = index + offset; !checked_cells.contains(coords))
 				{
-					cell->ForEachElement(grid, [&](const ElementId id, const ElementType& element)
-					{
-						if (const std::optional<FVector> hit_loc =
-							GridSemantics::LineHitPoint(element, m_start, m_end, m_dir, m_inv_dir))
-						{
-							if (closest.BlockingHit == false ||
-								FVector::DistSquared(m_start, *hit_loc) < FVector::DistSquared(m_start, closest.ImpactPoint))
-							{
-								closest.BlockingHit = true;
-								closest.Location = closest.ImpactPoint = *hit_loc;
-								closest.ElementId = id;
-							}
-						}
-					});
+					grid.GetCell(coords, scan_cell);
+					checked_cells.insert(coords);
 				}
-
-				checked_cells.insert(coords);
 			});
-
-			return closest;
 		}
 	};
 }

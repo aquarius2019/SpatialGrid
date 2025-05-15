@@ -5,8 +5,9 @@ namespace SpatialGrid
 {
 	struct CellRange
 	{
-		CellRange(const int32 InStep) : Step(FMath::Abs(InStep)) {}
-		CellRange(const CellIndex& InStep) : Step(FMath::Abs(InStep.X), FMath::Abs(InStep.Y), FMath::Abs(InStep.Z)) {}
+		explicit CellRange(const int32 InStep) : Step(FMath::Abs(InStep)) {}
+		explicit CellRange(const CellIndex& InStep)
+		: Step(FMath::Abs(InStep.X), FMath::Abs(InStep.Y), FMath::Abs(InStep.Z)) {}
 
 		FORCEINLINE int32 Count() const
 		{
@@ -92,25 +93,25 @@ namespace SpatialGrid
 		return FVector::DistSquared(SphereOrigin, Box.GetClosestPointTo(SphereOrigin)) <= RadiusSq;
 	}
 	
-	static bool BoxIntersectsBox(const FVector& A_Origin, const FVector& A_Extents, const FVector& B_Origin, const FVector& B_Extents)
+	static bool BoxIntersectsBox(const FVector& a_origin, const FVector& a_extent, const FVector& b_origin, const FVector& b_extent)
 	{
-		const FVector A_Min = A_Origin - A_Extents;
-		const FVector A_Max = A_Origin + A_Extents;
+		const FVector a_min = a_origin - a_extent;
+		const FVector a_max = a_origin + a_extent;
 		
-		const FVector B_Min = B_Origin - B_Extents;
-		const FVector B_Max = B_Origin + B_Extents;
+		const FVector b_min = b_origin - b_extent;
+		const FVector b_max = b_origin + b_extent;
 
-		if (A_Min.X > B_Max.X || B_Min.X > A_Max.X)
+		if (a_min.X > b_max.X || b_min.X > a_max.X)
 		{
 			return false;
 		}
 
-		if (A_Min.Y > B_Max.Y || B_Min.Y > A_Max.Y)
+		if (a_min.Y > b_max.Y || b_min.Y > a_max.Y)
 		{
 			return false;
 		}
 
-		if (A_Min.Z > B_Max.Z || B_Min.Z > A_Max.Z)
+		if (a_min.Z > b_max.Z || b_min.Z > a_max.Z)
 		{
 			return false;
 		}
@@ -138,20 +139,20 @@ namespace SpatialGrid
 		return true;
 	}
 	
-	static bool LineIntersectsBox(const FBox& Box, const FVector& Start, const FVector& InvDir)
+	static bool LineIntersectsBox(const FBox& box, const FVector& start, const FVector& inv_dir)
 	{
-		double T_Entry = TNumericLimits<double>::Lowest();
-		double T_Exit  = TNumericLimits<double>::Max();
+		double t_entry = TNumericLimits<double>::Lowest();
+		double t_exit  = TNumericLimits<double>::Max();
 		
-		for (int Axis = 0; Axis < 3; ++Axis)
+		for (int axis = 0; axis < 3; ++axis)
 		{
-			const double T1 = (Box.Min[Axis] - Start[Axis]) * InvDir[Axis];
-			const double T2 = (Box.Max[Axis] - Start[Axis]) * InvDir[Axis];
+			const double t1 = (box.Min[axis] - start[axis]) * inv_dir[axis];
+			const double t2 = (box.Max[axis] - start[axis]) * inv_dir[axis];
 			
-			T_Entry = FMath::Max(T_Entry, FMath::Min(T1, T2));
-			T_Exit  = FMath::Min(T_Exit,  FMath::Max(T1, T2));
+			t_entry = FMath::Max(t_entry, FMath::Min(t1, t2));
+			t_exit  = FMath::Min(t_exit,  FMath::Max(t1, t2));
 
-			if (T_Entry > T_Exit)
+			if (t_entry > t_exit)
 			{
 				return false; // Ray misses the box
 			}
@@ -160,131 +161,78 @@ namespace SpatialGrid
 		return true;
 	}
 
-	static bool LineIntersectsSphere(const FVector& Start, const FVector& End, const FVector& Dir,
-		const FVector& SphereOrigin, const double SphereRadius)
+	static bool LineIntersectsSphere(const FVector& s, const FVector& end, const FVector& dir,
+		const FVector& sphere_origin, const double sphere_radius)
 	{
-		const FVector StartToCenter = Start - SphereOrigin;
-		const double RadiusSq = SphereRadius * SphereRadius;
+		const FVector start_to_ctr = s - sphere_origin;
+		const double radius_sq = sphere_radius * sphere_radius;
 		
-		if (StartToCenter.SizeSquared() < RadiusSq)
+		if (start_to_ctr.SizeSquared() < radius_sq)
 		{
 			return true;
 		}
 		
-		const double V = Dir | (SphereOrigin - Start);
-		const double Discriminant = (RadiusSq) - ((StartToCenter | StartToCenter) - (V * V));
+		const double v = dir | (sphere_origin - s);
+		const double discriminant = (radius_sq) - ((start_to_ctr | start_to_ctr) - (v * v));
 		
-		if(Discriminant < 0)
+		if(discriminant < 0)
 		{
 			return false;
 		}
 
-		const double Time = V - FMath::Sqrt(Discriminant);
+		const double time = v - FMath::Sqrt(discriminant);
 
-		if(Time < 0 || FMath::Square(Time) > FVector::DistSquared(Start, End))
+		if(time < 0 || FMath::Square(time) > FVector::DistSquared(s, end))
 		{
 			return false;
 		}
 
 		return true;
 	}
-	
-	static std::optional<FVector> LineBoxHitPoint(const FBox& Box, const FVector& Start, const FVector& End,
-		const FVector& Dir, const FVector& InvDir)
+
+	static bool LineBoxHitPoint(const FBox& box, const FVector& start, const FVector& end, const FVector& dir,
+		const FVector& inv_dir, FVector& out_hit)
 	{
-		if (Box.IsInside(Start))
+		if (box.IsInside(start))
 		{
-			return Start;	
-		}
-		
-		double T_Entry = TNumericLimits<double>::Lowest();
-		double T_Exit  = TNumericLimits<double>::Max();
-		
-		for (int Axis = 0; Axis < 3; ++Axis)
-		{
-			const double T1 = (Box.Min[Axis] - Start[Axis]) * InvDir[Axis];
-			const double T2 = (Box.Max[Axis] - Start[Axis]) * InvDir[Axis];
-			
-			T_Entry = FMath::Max(T_Entry, FMath::Min(T1, T2));
-			T_Exit  = FMath::Min(T_Exit,  FMath::Max(T1, T2));
-
-			if (T_Entry > T_Exit)
-			{
-				return std::nullopt; // Ray misses the box
-			}
-		}
-
-		if (T_Entry < 0 || FMath::Square(T_Entry) > FVector::DistSquared(Start, End))
-		{
-			return std::nullopt;
-		}
-		
-		return Start + (Dir * T_Entry);
-	}
-
-	static bool LineBoxHitPoint(const FBox& Box, const FVector& Start, const FVector& End, const FVector& Dir,
-		const FVector& InvDir, FVector& OutHit)
-	{
-		if (Box.IsInside(Start))
-		{
-			OutHit = Start;
+			out_hit = start;
 			return true;	
 		}
 		
-		double T_Entry = TNumericLimits<double>::Lowest();
-		double T_Exit  = TNumericLimits<double>::Max();
+		double t_entry = TNumericLimits<double>::Lowest();
+		double t_exit  = TNumericLimits<double>::Max();
 		
 		for (int Axis = 0; Axis < 3; ++Axis)
 		{
-			const double T1 = (Box.Min[Axis] - Start[Axis]) * InvDir[Axis];
-			const double T2 = (Box.Max[Axis] - Start[Axis]) * InvDir[Axis];
+			const double t1 = (box.Min[Axis] - start[Axis]) * inv_dir[Axis];
+			const double t2 = (box.Max[Axis] - start[Axis]) * inv_dir[Axis];
 			
-			T_Entry = FMath::Max(T_Entry, FMath::Min(T1, T2));
-			T_Exit  = FMath::Min(T_Exit,  FMath::Max(T1, T2));
+			t_entry = FMath::Max(t_entry, FMath::Min(t1, t2));
+			t_exit  = FMath::Min(t_exit,  FMath::Max(t1, t2));
 
-			if (T_Entry > T_Exit)
+			if (t_entry > t_exit)
 			{
 				return false; // Ray misses the box
 			}
 		}
 
-		if (T_Entry < 0 || FMath::Square(T_Entry) > FVector::DistSquared(Start, End))
+		if (t_entry < 0 || FMath::Square(t_entry) > FVector::DistSquared(start, end))
 		{
 			return false;
 		}
 		
-		OutHit = Start + (Dir * T_Entry);
+		out_hit = start + (dir * t_entry);
 		return true;
 	}
-	
-	// returns the intersection point if the line intersects 
-	static std::optional<FVector> LineSphereHitPoint(const FVector& start, const FVector& end_, const FVector& dir,
-		const FVector& sphere_origin, const double sphere_radius)
+
+	static std::optional<FVector> LineBoxHitPoint(const FBox& box, const FVector& start, const FVector& end,
+		const FVector& dir, const FVector& inv_dir)
 	{
-		const FVector start_to_center = start - sphere_origin;
-		const double radius_squared = sphere_radius * sphere_radius;
-		
-		if (start_to_center.SizeSquared() < radius_squared)
+		if (FVector hit; LineBoxHitPoint(box, start, end, dir, inv_dir, hit))
 		{
-			return start;
+			return hit;
 		}
-		
-		const double v = dir | (sphere_origin - start);
-		const double discriminant = (radius_squared) - ((start_to_center | start_to_center) - (v * v));
-		
-		if (discriminant < 0)
-		{
-			return std::nullopt;
-		}
-
-		const double time = v - FMath::Sqrt(discriminant);
-
-		if (time < 0 || FMath::Square(time) > FVector::DistSquared(start, end_))
-		{
-			return std::nullopt;
-		}
-
-		return start + (dir * time);
+		return std::nullopt;
 	}
 
 	static bool LineSphereHitPoint(const FVector& start, const FVector& end_, const FVector& dir,
@@ -316,5 +264,17 @@ namespace SpatialGrid
 
 		out_hit = start + (dir * time);
 		return true;
+	}
+
+	
+	// returns the intersection point if the line intersects 
+	static std::optional<FVector> LineSphereHitPoint(const FVector& start, const FVector& end, const FVector& dir,
+		const FVector& sphere_origin, const double sphere_radius)
+	{
+		if (FVector out_hit; LineSphereHitPoint(start, end, dir, sphere_origin, sphere_radius, out_hit))
+		{
+			return out_hit;
+		}
+		return std::nullopt;
 	}
 }

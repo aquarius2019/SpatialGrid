@@ -2,9 +2,8 @@
 
 #include "SpatialGrid.h"
 
-#define LOCTEXT_NAMESPACE "FSpatialGridModule"
-
 DEFINE_LOG_CATEGORY(LogSpatialGrid);
+#define LOCTEXT_NAMESPACE "FSpatialGridModule"
 
 void FSpatialGridModule::StartupModule()
 {

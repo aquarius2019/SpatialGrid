@@ -49,12 +49,12 @@ namespace SpatialGrid
 			else
 			{
 				version = 1;
-				Slots.push_back(Slot{.Version = 1, .IdxOrFree = Dense.size()});
+				Slots.push_back(Slot{.Version = 1, .IdxOrFree = static_cast<uint32_t>(Dense.size())});
 				FreeHead = Slots.size();
 			}
 			
 			ElementId id = ElementId(index, version);
-			Dense.push_back(std::make_pair(id, std::forward<Args>(args)...));
+			Dense.push_back(std::make_pair(id, V(std::forward<Args>(args)...)));
 
 			return id;
 		}

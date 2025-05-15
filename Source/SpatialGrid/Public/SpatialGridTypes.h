@@ -21,6 +21,18 @@ namespace SpatialGrid
 }
 
 template <>
+struct ankerl::unordered_dense::hash<SpatialGrid::ElementId>
+{
+	using is_avalanching = void;
+
+	[[nodiscard]] auto operator()(SpatialGrid::ElementId const& id) const noexcept -> uint64_t
+	{
+		static_assert(std::has_unique_object_representations_v<SpatialGrid::ElementId>);
+		return ankerl::unordered_dense::detail::wyhash::hash(&id, sizeof(id));
+	}
+};
+
+template <>
 struct ankerl::unordered_dense::hash<SpatialGrid::CellIndex>
 {
 	using is_avalanching = void;

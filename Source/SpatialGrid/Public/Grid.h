@@ -13,8 +13,7 @@ namespace SpatialGrid
 		static_assert(Semantics::MaxElementRadius < HalfCellSize<Semantics>(), "max element radius must be less than half cell size");
 
 		using ElementData = typename Semantics::ElementData;
-
-	private:
+		
 		struct Element
 		{
 			Element() = default;
@@ -27,7 +26,6 @@ namespace SpatialGrid
 
 		using ElementIds = ankerl::unordered_dense::set<ElementId>;
 		
-	public:
 		struct Cell
 		{
 			Cell() = default;
@@ -86,7 +84,7 @@ namespace SpatialGrid
 		ElementId AddElement(Args&&... args)
 		{
 			ElementData data(std::forward<Args>(args)...);
-			
+
 			const FBoxSphereBounds& ElementBounds = Semantics::ElementBounds(data);
 
 			checkf(ElementBounds.SphereRadius < HalfCellSize<Semantics>(),
@@ -95,7 +93,7 @@ namespace SpatialGrid
 			const CellIndex coords = LocationToCoordinates(ElementBounds.Origin);
 
 			FScopeLock Lock(&CriticalSection);
-				
+			
 			ElementId new_id = Elements.Insert(coords, std::move(data));
 			Cell& cell = FindOrAddCell(coords);
 			cell.Elements.insert(new_id);
@@ -107,9 +105,9 @@ namespace SpatialGrid
 		{
 			FScopeLock Lock(&CriticalSection);
 			
-			if (std::optional<Element> Handle = Elements.Remove(id))
+			if (std::optional<Element> element = Elements.Remove(id))
 			{
-				if (auto it = Cells.find(Handle->Cell); it != Cells.end())
+				if (auto it = Cells.find(element->Cell); it != Cells.end())
 				{
 					it->second.Elements.erase(id);
 				}
@@ -126,7 +124,7 @@ namespace SpatialGrid
 		{
 			FScopeLock Lock(&CriticalSection);
 			
-			std::erase_if(Cells, [](const std::pair<CellIndex, Cell>& entry)
+			std::erase_if(Cells, [](const auto& entry)
 			{
 				const auto& [_, cell] = entry;
 				return !cell.HasElements();
@@ -135,16 +133,17 @@ namespace SpatialGrid
 
 		void UpdateElementLocation(const ElementId id, const FVector& new_location)
 		{
-			FScopeLock Lock(&CriticalSection);
-
 			Element* element = Elements.Get(id); if (!element) { return; }
+
+			FScopeLock Lock(&CriticalSection);
 			
 			Semantics::SetElementLocation(element->Data, new_location);
 			const CellIndex new_coords = LocationToCoordinates(new_location);
 
 			if (new_coords != element->Cell)
 			{
-				auto cell_it = Cells.find(element->Cell); if (cell_it == Cells.end()) { return; }
+				auto cell_it = Cells.find(element->Cell); check(cell_it != Cells.end());
+				
 				Cell& prev_cell = cell_it->second;
 				prev_cell.Elements.erase(id);
 				
@@ -154,12 +153,14 @@ namespace SpatialGrid
 			}
 		}
 		
+		/// This function is not thread safe!!!
 		FORCEINLINE const Cell* GetCell(const CellIndex& Coords) const
 		{
 			const auto it = Cells.find(Coords);
 			return it != Cells.end() ? &(it->second) : nullptr;
 		}
 
+		/// This function is not thread safe!!!
 		template<typename  F>
 		void GetCell(const CellIndex& Coords, F&& func) const
 		{
@@ -172,18 +173,18 @@ namespace SpatialGrid
 		template <typename IterFunc>
 		void ForEachCell(IterFunc&& Func) const
 		{
-			for (const auto& [Coords, Cell] : Cells)
+			for (const auto& [coords, cell] : Cells)
 			{
-				Func(Coords, Cell);
+				Func(coords, cell);
 			}
 		}
 
 		template <typename IterFunc>
 		void ForEachElement(IterFunc&& Func) const
 		{
-			for (const auto& [id, Handle] : Elements)
+			for (const auto& [id, element] : Elements)
 			{
-				Func(id, Handle.Element);
+				Func(id, element);
 			}
 		}
 
@@ -204,8 +205,8 @@ namespace SpatialGrid
 
 	private:
 		FVector Origin = FVector::ZeroVector;
-		CellStorage Cells;
 		TSlotMap<Element> Elements;
+		CellStorage Cells;
 		FBox Bounds;
 		FCriticalSection CriticalSection;
 		
@@ -215,8 +216,8 @@ namespace SpatialGrid
 			
 			if (is_new_cell)
 			{
-				const FVector cell_origin = CellCenter(coords);
 				constexpr FVector cell_extent = SpatialGrid::CellExtent<Semantics>();
+				const FVector cell_origin = CellCenter(coords);
 				Bounds += FBox(cell_origin - cell_extent, cell_origin + cell_extent);
 			}
 			
