@@ -164,7 +164,7 @@ namespace SpatialGrid
 		{
 			auto scan_element = [this, func = std::forward<F>(func)](const ElementId& id, const Element& element)
 			{
-				if (FVector hit_loc; Semantics::LineHitPoint(element.Data, Start, End, Dir, InvDir, hit_loc))
+				if (FVector hit_loc; element.Bounds.LineHitPoint(Start, End, Dir, InvDir, hit_loc))
 				{
 					func(id, element, hit_loc);
 				}
@@ -195,7 +195,7 @@ namespace SpatialGrid
 			
 			auto scan_element = [this, &closest](const ElementId id, const Element& element)
 			{
-				if (FVector hit_loc; Semantics::LineHitPoint(element.Data, Start, End, Dir, InvDir, hit_loc))
+				if (FVector hit_loc; element.Bounds.LineHitPoint(Start, End, Dir, InvDir, hit_loc))
 				{
 					if (!closest.BlockingHit || FVector::DistSquared(Start, hit_loc) < FVector::DistSquared(Start, closest.ImpactPoint))
 					{

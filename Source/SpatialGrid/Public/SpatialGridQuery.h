@@ -5,12 +5,6 @@
 
 namespace SpatialGrid
 {
-	enum class EQueryShape
-	{
-		Box,
-		Sphere,
-	};
-
 	enum class EQueryCacheType
 	{
 		Cached,
@@ -18,10 +12,10 @@ namespace SpatialGrid
 	};
 	
 	template<typename Semantics, EQueryCacheType>
-	struct TQuery;
+	struct TSphereQuery;
 
 	template<typename GridSemantics>
-	struct TQueryBuilder;
+	struct TSphereQueryBuilder;
 	
 	template<typename Semantics, EQueryCacheType CacheType>
 	struct TQueryIter
@@ -29,7 +23,7 @@ namespace SpatialGrid
 		using Grid		= TSpatialGrid<Semantics>;
 		using Cell		= typename Grid::Cell;
 		using Element	= typename Grid::Element;
-		using QueryType	= TQuery<Semantics, CacheType>;
+		using QueryType	= TSphereQuery<Semantics, CacheType>;
 
 		TQueryIter(const QueryType* query, const FVector& origin) : Query(query), Origin(origin) {}
 
@@ -61,12 +55,12 @@ namespace SpatialGrid
 
 			auto scan_element = [this, radius, func=std::forward<F>(func)](const ElementId id, const Element& element)
 			{
-				if (Semantics::ElementOverlapsSphere(element, Origin, radius))
+				if (element.Bounds.OverlapsSphere(Origin, radius))
 				{
 					func(id, element);
 				}
 			};
-			auto scan_cell = [this, &grid, &scan_element, radius_sq](const Cell& cell)
+			auto scan_cell = [this, &grid, &scan_element, radius_sq](const CellIndex&, const Cell& cell)
 			{
 				if (BoxIntersectsSphereRadiusSq(cell.GetBounds(), Origin, radius_sq))
 				{
@@ -74,9 +68,9 @@ namespace SpatialGrid
 				}	
 			};
 			
-			if (Query->GetCellCount() > grid.NumCells())
+			if (Query->CellCount() > grid.NumCells())
 			{
-				grid.for_each_cell(scan_cell);
+				grid.ForEachCell(scan_cell);
 				return;
 			}
 			
@@ -108,7 +102,7 @@ namespace SpatialGrid
 		}
 
 		template<typename F>
-		void UncachedEach(const TSpatialGrid<Semantics>& grid, F&& func) const
+		void UncachedEach(const Grid& grid, F&& func) const
 		{
 			if (!Query) { return; }
 			
@@ -119,13 +113,13 @@ namespace SpatialGrid
 
 			auto scan_element = [this, radius, func=std::forward<F>(func)](const ElementId id, const Element& element)
 			{
-				if (Semantics::ElementOverlapsSphere(element, Origin, radius))
+				if (element.Bounds.OverlapsSphere(Origin, radius))
 				{
 					func(id, element);
 				}
 			};
 			
-			auto scan_cell = [this, &grid, &scan_element, radius_sq](const Cell& cell)
+			auto scan_cell = [this, &grid, &scan_element, radius_sq](const CellIndex&, const Cell& cell)
 			{
 				if (BoxIntersectsSphereRadiusSq(cell.GetBounds(), Origin, radius_sq))
 				{
@@ -135,7 +129,7 @@ namespace SpatialGrid
 			
 			if (cell_range.Count() > grid.NumCells())
 			{
-				grid.for_each_cell(scan_cell);
+				grid.ForEachCell(scan_cell);
 			}
 			else
 			{
@@ -148,90 +142,78 @@ namespace SpatialGrid
 	};
 	
 	template<typename Semantics, EQueryCacheType CacheType>
-	struct TQuery
+	struct TSphereQuery
 	{
-		using Grid    = TSpatialGrid<Semantics>;
-		using Cell    = typename Grid::Cell;
-		using Element = typename Grid::Element;
-
-		
-		TQuery() = default;
-		
-		explicit TQuery(const double radius) : Radius(radius) {}
-		
-		TQuery(TQuery&& other)
-		{
-			Radius = other.Radius;
-			InnerCells = MoveTemp(other.InnerCells);
-			EdgeCells  = MoveTemp(other.EdgeCells);
-			OuterCells = MoveTemp(other.OuterCells);
-		}
+		explicit TSphereQuery() = default;
+		explicit TSphereQuery(const double radius) : Radius(radius) {}
 		
 		TQueryIter<Semantics, CacheType> SetOrigin(const FVector& origin) const
 		{
 			return TQueryIter<Semantics, CacheType>(this, origin);
 		}
-
-		int32 GetCellCount() const
-		{
-			return CellCount;
-		}
-
 	private:
 		double Radius = 0;
-		int32 CellCount = 0;
-		TArray<CellIndex> InnerCells;
-		TArray<CellIndex> EdgeCells;
-		TArray<CellIndex> OuterCells;
+		
 		friend struct TQueryIter<Semantics, CacheType>;
-		friend struct TQueryBuilder<Semantics>;
+		friend struct TSphereQueryBuilder<Semantics>;
 	};
 
 	template<typename Semantics>
-	struct TQueryBuilder
+	struct TSphereQuery<Semantics, EQueryCacheType::Cached>
 	{
-		using Self = TQueryBuilder;
+		explicit TSphereQuery() = default;
+		explicit TSphereQuery(const double radius) : Radius(radius) {}
+		
+		TQueryIter<Semantics, EQueryCacheType::Cached> SetOrigin(const FVector& origin) const
+		{
+			return TQueryIter<Semantics, EQueryCacheType::Cached>(this, origin);
+		}
+		
+		int32 CellCount() const
+		{
+			return InnerCells.Num() + EdgeCells.Num() + OuterCells.Num();
+		}
+		
+	private:
+		double Radius = 0;
+		TArray<CellIndex> InnerCells;
+		TArray<CellIndex> EdgeCells;
+		TArray<CellIndex> OuterCells;
+		
+		friend struct TQueryIter<Semantics, EQueryCacheType::Cached>;
+		friend struct TSphereQueryBuilder<Semantics>;
+	};
+	
+	template<typename Semantics>
+	struct TSphereQueryBuilder
+	{
+		using Self = TSphereQueryBuilder;
 		
 		Self& SetRadius(const double radius)
 		{
-			Shape = EQueryShape::Sphere;
 			Radius = radius;
 			return *this;
 		}
-
-		Self& SetBoxExtent(const FVector& extent)
-		{
-			Shape = EQueryShape::Box;
-			Extents = extent;
-			return *this;
-		}
-
+		
 		template<EQueryCacheType CacheType>
-		TQuery<Semantics, CacheType> Build()
+		TSphereQuery<Semantics, CacheType> Build()
 		{
 			if constexpr(CacheType == EQueryCacheType::Cached)
 			{
-				switch (Shape)
-				{
-				case EQueryShape::Box: return {};
-				case EQueryShape::Sphere: return BuildSphere();
-				default: return {};
-				}
+				return BuildCached();
 			}
 			else
 			{
-				return TQuery<Semantics, EQueryCacheType::UnCached>(Radius);
+				return TSphereQuery<Semantics, EQueryCacheType::UnCached>(Radius);
 			}
 		}
 		
 	private:
-		EQueryShape Shape = EQueryShape::Sphere;
-		double Radius = 0;
-		FVector Extents = FVector(0, 0, 0);
+		double Radius = Semantics::CellSize;
 		
-		TQuery<Semantics, EQueryCacheType::Cached> BuildSphere()
+		TSphereQuery<Semantics, EQueryCacheType::Cached> BuildCached()
 		{
-			TQuery<Semantics, EQueryCacheType::Cached> query(Radius);
+			TSphereQuery<Semantics, EQueryCacheType::Cached> query(Radius);
 			
 			const int32 bounds = FMath::RoundToInt32(Radius / Semantics::CellSize) + 1;
 			constexpr FVector cell_extent = SpatialGrid::CellExtent<Semantics>();
@@ -261,8 +243,6 @@ namespace SpatialGrid
 					query.OuterCells.Add(index);
 				}
 			});
-
-			query.CellCount = query.InnerCells.Num() + query.EdgeCells.Num() + query.OuterCells.Num();
 			
 			return MoveTemp(query);
 		}

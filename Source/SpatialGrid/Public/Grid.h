@@ -17,10 +17,18 @@ namespace SpatialGrid
 		struct Element
 		{
 			Element() = default;
-			Element(const CellIndex& InCoord, ElementData&& InData) : Cell(InCoord), Data(std::move(InData)) {}
-			Element(const CellIndex& InCoord, const ElementData& InData): Cell(InCoord), Data(InData) {}
+			Element(const CellIndex& cell,const Bounds& bounds, ElementData&& data)
+			: Cell(cell)
+			, Bounds(bounds)
+			, Data(std::move(data)) {}
+			
+			Element(const CellIndex& cell, const Bounds& bounds, const ElementData& data)
+			: Cell(cell)
+			, Bounds(bounds)
+			, Data(data) {}
 		
 			CellIndex Cell = CellIndex(TNumericLimits<int32>::Max());
+			Bounds Bounds;
 			ElementData Data;
 		};
 
@@ -79,22 +87,16 @@ namespace SpatialGrid
 				Origin.Y + (Coords.Y * Semantics::CellSize),
 				Origin.Z + (Coords.Z * Semantics::CellSize));
 		}
-
-		template<typename ...Args>
-		ElementId AddElement(Args&&... args)
+		
+		ElementId AddElement(const Bounds& bounds, ElementData&& data)
 		{
-			ElementData data(std::forward<Args>(args)...);
-
-			const FBoxSphereBounds& ElementBounds = Semantics::ElementBounds(data);
-
-			checkf(ElementBounds.SphereRadius < HalfCellSize<Semantics>(),
-				TEXT("element radius must be less than cell extent"));
+			checkf(bounds.GetRadius() < HalfCellSize<Semantics>(), TEXT("element radius must be less than cell extent"));
 			
-			const CellIndex coords = LocationToCoordinates(ElementBounds.Origin);
+			const CellIndex coords = LocationToCoordinates(bounds.Origin);
 
 			FScopeLock Lock(&CriticalSection);
 			
-			ElementId new_id = Elements.Insert(coords, std::move(data));
+			ElementId new_id = Elements.Insert(coords, bounds, std::move(data));
 			Cell& cell = FindOrAddCell(coords);
 			cell.Elements.insert(new_id);
 			
@@ -136,8 +138,9 @@ namespace SpatialGrid
 			Element* element = Elements.Get(id); if (!element) { return; }
 
 			FScopeLock Lock(&CriticalSection);
+
+			element->Bounds.Origin = new_location;
 			
-			Semantics::SetElementLocation(element->Data, new_location);
 			const CellIndex new_coords = LocationToCoordinates(new_location);
 
 			if (new_coords != element->Cell)
