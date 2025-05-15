@@ -13,7 +13,7 @@ namespace SpatialGrid
 	{
 		using Grid    = TSpatialGrid<GridSemantics>;
 		using Cell    = typename Grid::Cell;
-		using Element = typename Grid::ElementData;
+		using Element = typename Grid::Element;
 		using CellSet = ankerl::unordered_dense::set<CellIndex>;
 		
 		TLineTrace(const FVector& start, const FVector& end_)
@@ -35,7 +35,7 @@ namespace SpatialGrid
 		{
 			// check that line intersects current grid bounds
 			FVector hit_point;
-			if (LineBoxHitPoint(grid.GetBounds(), m_start, m_end, m_dir, m_inv_dir, hit_point) == false)
+			if (!LineBoxHitPoint(grid.GetBounds(), m_start, m_end, m_dir, m_inv_dir, hit_point))
 			{
 				return;
 			}
@@ -100,7 +100,7 @@ namespace SpatialGrid
 			// Should be able to estimate the number of cells to check from the length of the trace
 			while(true) 
 			{
-				result = check_closest(grid, current_cell, checked_cells);
+				check_closest(grid, current_cell, checked_cells, result);
 
 				if (result.BlockingHit || current_cell == end_cell || !grid.IsCellWithinBounds(current_cell))
 				{
@@ -120,7 +120,6 @@ namespace SpatialGrid
 		FVector m_inv_dir;
 		FVector m_delta;
 		CellIndex m_step;
-	
 		static constexpr FVector cell_extent = SpatialGrid::CellExtent<GridSemantics>();
 
 		void progress(CellIndex& current_cell, FVector& t_max) const
@@ -143,8 +142,8 @@ namespace SpatialGrid
 			}
 		}
 		
-		template<typename IterFunc>
-		void check_cells(const Grid& grid, const CellIndex& offset, CellSet& checked_cells, IterFunc&& func) const
+		template<typename F>
+		void check_cells(const Grid& grid, const CellIndex& offset, CellSet& checked_cells, F&& func) const
 		{
 			// check (3x3x3) cube around current cell (including current cell)
 			CellRange(1).ForEach([&](const CellIndex& index)
@@ -153,30 +152,29 @@ namespace SpatialGrid
 				
 				if(checked_cells.contains(coords)) { return; }
 				
-				const Cell* cell = grid.GetCell(coords);
-				
-				if (cell && cell->HasElements() && LineIntersectsBox(cell->GetBounds(), m_start, m_inv_dir))
+				grid.GetCell(coords, [this, grid, &func](const Cell& cell)
 				{
-					cell->ForEachElement(grid, [&](ElementId, const Element& element)
+					if (cell.HasElements() && LineIntersectsBox(cell.GetBounds(), m_start, m_inv_dir))
 					{
-						if (std::optional<FVector> hit_loc =
-							GridSemantics::LineHitPoint(element, m_start, m_end, m_dir, m_inv_dir))
+						cell.ForEachElement(grid, [&](auto&, const Element& element)
 						{
-							func(element, *hit_loc);
-						}
-					});
-				}
-
+							if (std::optional<FVector> hit_loc =
+							GridSemantics::LineHitPoint(element, m_start, m_end, m_dir, m_inv_dir))
+							{
+								func(element, *hit_loc);
+							}
+						});
+					}
+				});
+				
 				checked_cells.insert(coords);
 			});
 		}
-		
-		QueryResult check_closest(const Grid& grid, const CellIndex& offset, CellSet& checked_cells) const
+
+		void check_closest(const Grid& grid, const CellIndex& offset, CellSet& checked_cells, QueryResult& closest) const
 		{
 			using GridCell = typename TSpatialGrid<GridSemantics>::Cell;
 			using ElementType = typename GridSemantics::ElementData;
-
-			QueryResult closest = {};
 			
 			// check (3x3x3) cube around current cell (including current cell)
 			CellRange(1).ForEach(offset, [&](CellIndex coords)

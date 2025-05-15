@@ -9,7 +9,7 @@ namespace SpatialGrid
 	struct ElementId
 	{
 		constexpr ElementId() : Index(0), Version(0) {}
-		constexpr ElementId(const uint32_t Idx, const uint32_t Gen) : Index(Idx), Version(Gen) {}
+		constexpr ElementId(const uint32_t Idx, const uint32_t Ver) : Index(Idx), Version(Ver) {}
 		constexpr bool operator==(const ElementId& Other) const
 		{
 			return Index == Other.Index && Version == Other.Version;

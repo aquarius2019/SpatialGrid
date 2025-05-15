@@ -12,10 +12,7 @@ namespace SpatialGrid
 		/// Index to dense array when occupied, next free slot otherwise.
 		uint32_t IdxOrFree;
 
-		FORCEINLINE bool IsOccupied() const
-		{
-			return (Version % 2) != 0;
-		}
+		bool IsOccupied() const { return (Version % 2) != 0; }
 	};
 	
 	template <typename V>
@@ -25,7 +22,6 @@ namespace SpatialGrid
 		
 		explicit TSlotMap(size_t Capacity)
 		{
-			// Slots is resized as needed.
 			Dense.reserve(Capacity);
 		}
 
@@ -53,7 +49,7 @@ namespace SpatialGrid
 			else
 			{
 				version = 1;
-				Slots.push_back(Slot{1, Dense.size()});
+				Slots.push_back(Slot{.Version = 1, .IdxOrFree = Dense.size()});
 				FreeHead = Slots.size();
 			}
 			
@@ -80,7 +76,7 @@ namespace SpatialGrid
 			const size_t dense_idx = slot.IdxOrFree;
 			
 			check(dense_idx < Dense.size());
-			check(Dense[dense_idx].first.Index == id.Index);
+			check(Dense[dense_idx].first == id);
 
 			V value = std::move(Dense[dense_idx].second);
 
@@ -106,7 +102,7 @@ namespace SpatialGrid
 			}
 
 			const Slot& Slot = Slots[Id.Index];
-			return Slot.IsOccupied() && Slot.Version != Id.Version;
+			return Slot.IsOccupied() && Slot.Version == Id.Version;
 		}
 
 		const V* Get(const ElementId& id) const

@@ -31,8 +31,16 @@ namespace SpatialGrid
 		struct Cell
 		{
 			Cell() = default;
+
+			const FBox& GetBounds() const
+			{
+				return Bounds;
+			}
 			
-			bool HasElements() const { return Elements.empty() == false; }
+			bool HasElements() const
+			{
+				return !Elements.empty();
+			}
 
 			template<typename F>
 			void ForEachElement(const TSpatialGrid& Grid, F&& Func) const
@@ -42,9 +50,10 @@ namespace SpatialGrid
 					Grid.Elements.ApplyAt(Id, std::forward<F>(Func));
 				}
 			}
-		
+			
 		private:
 			ElementIds Elements;
+			FBox Bounds;
 			friend struct TSpatialGrid;
 		};
 
