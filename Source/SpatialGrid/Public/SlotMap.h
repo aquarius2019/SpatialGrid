@@ -134,7 +134,7 @@ namespace SpatialGrid
 		}
 
 		template<typename F>
-		void ApplyAt(const ElementId& id, F&& Func) const
+		void ApplyAt(const ElementId& id, F&& func) const
 		{
 			if (id.Index < Slots.size()) [[unlikely]]
 			{
@@ -144,8 +144,8 @@ namespace SpatialGrid
 			if (const Slot& slot = Slots[id.Index]; slot.IsOccupied() && slot.Version == id.Version) [[likely]]
 			{
 				check(slot.IdxOrFree < Dense.size());
-				const auto&[id, value] = Dense[slot.IdxOrFree];
-				Func(id, value);
+				const auto&[id_, value] = Dense[slot.IdxOrFree];
+				func(id_, value);
 			}
 		}
 		

@@ -17,270 +17,252 @@ namespace SpatialGrid
 		UnCached
 	};
 	
-	template<typename GridSemantics, EQueryCacheType>
+	template<typename Semantics, EQueryCacheType>
 	struct TQuery;
 
 	template<typename GridSemantics>
 	struct TQueryBuilder;
 	
-	template<typename GridSemantics, EQueryCacheType CacheType>
+	template<typename Semantics, EQueryCacheType CacheType>
 	struct TQueryIter
 	{
-		using QueryType = TQuery<GridSemantics, CacheType>;
+		using Grid		= TSpatialGrid<Semantics>;
+		using Cell		= typename Grid::Cell;
+		using Element	= typename Grid::Element;
+		using QueryType	= TQuery<Semantics, CacheType>;
 
-		TQueryIter(const QueryType* query, const FVector& origin) : m_query(query), m_origin(origin) {}
+		TQueryIter(const QueryType* query, const FVector& origin) : Query(query), Origin(origin) {}
 
-		template<typename IterFunc>
-		void each(const TSpatialGrid<GridSemantics>& grid, IterFunc&& func) const
+		template<typename F>
+		void Each(const Grid& grid, F&& func) const
 		{
+			if (!Query) return;
+			
 			if constexpr(CacheType == EQueryCacheType::Cached)
 			{
-				cached_each(grid, std::forward<IterFunc>(func));
+				CachedEach(grid, std::forward<F>(func));
 			}
 			else
 			{
-				uncached_each(grid, std::forward<IterFunc>(func));
+				UncachedEach(grid, std::forward<F>(func));
 			}
 		}
 
 	private:
-		const QueryType* m_query = nullptr;
-		FVector m_origin = FVector::ZeroVector;
+		const QueryType* Query = nullptr;
+		FVector Origin = FVector::ZeroVector;
 		
-		template<typename IterFunc>
-		void cached_each(const TSpatialGrid<GridSemantics>& grid, IterFunc&& func) const
+		template<typename F>
+		void CachedEach(const Grid& grid, F&& func) const
 		{
-			using GridCell    = typename TSpatialGrid<GridSemantics>::Cell;
-			using ElementType = typename TSpatialGrid<GridSemantics>::ElementData;
-			
-			const double radius = m_query->m_radius;
+			const double radius = Query->Radius;
 			const double radius_sq = radius * radius;
-			const CellIndex offset = grid.LocationToCoordinates(m_origin);
+			const CellIndex offset = grid.LocationToCoordinates(Origin);
 
-			if (m_query->cell_count() > grid.NumCells())
+			auto scan_element = [this, radius, func=std::forward<F>(func)](const ElementId id, const Element& element)
 			{
-				grid.for_each_cell([&](const GridCell& cell)
+				if (Semantics::ElementOverlapsSphere(element, Origin, radius))
 				{
-					if (cell.HasElements() && BoxIntersectsSphereRadiusSq(cell.GetBounds(), m_origin, radius_sq))
-					{
-						cell.ForEachElement(grid, [&](const ElementId id, const ElementType& element)
-						{
-							if (GridSemantics::ElementOverlapsSphere(element, m_origin, radius))
-							{
-								func(id, element);
-							}
-						});
-					}
-				});
-
+					func(id, element);
+				}
+			};
+			auto scan_cell = [this, &grid, &scan_element, radius_sq](const Cell& cell)
+			{
+				if (BoxIntersectsSphereRadiusSq(cell.GetBounds(), Origin, radius_sq))
+				{
+					cell.ForEachElement(grid, scan_element);
+				}	
+			};
+			
+			if (Query->GetCellCount() > grid.NumCells())
+			{
+				grid.for_each_cell(scan_cell);
 				return;
 			}
 			
-			for (const CellIndex& cell_coord : m_query->m_inner_cells)
+			for (const CellIndex& cell_coord : Query->InnerCells)
 			{
-				const GridCell* cell = grid.GetCell(cell_coord + offset);
-				
-				if (cell && cell->HasElements())
+				if (const Cell* cell = grid.GetCell(cell_coord + offset); cell && cell->HasElements())
 				{
-					cell->ForEachElement(grid, std::forward<IterFunc>(func));
+					cell->ForEachElement(grid, std::forward<F>(func));
 				}
 			}
 
-			for (const CellIndex& cell_coord : m_query->m_edge_cells)
+			for (const CellIndex& cell_coord : Query->EdgeCells)
 			{
-				if (const GridCell* cell = grid.GetCell(cell_coord + offset))
+				if (const Cell* cell = grid.GetCell(cell_coord + offset))
 				{
-					cell->ForEachElement(grid, [&](const ElementId id, const ElementType& element)
-					{
-						if (GridSemantics::ElementOverlapsSphere(element, m_origin, radius))
-						{
-							func(id, element);
-						}
-					});
+					cell->ForEachElement(grid, scan_element);
 				}
 			}
 
-			for (const CellIndex& cell_coord : m_query->m_outer_cells)
+			for (const CellIndex& cell_coord : Query->OuterCells)
 			{
-				const GridCell* cell = grid.GetCell(cell_coord + offset);
+				const Cell* cell = grid.GetCell(cell_coord + offset);
 
-				if (cell && BoxIntersectsSphereRadiusSq(cell->GetBounds(), m_origin, radius_sq))
+				if (cell && BoxIntersectsSphereRadiusSq(cell->GetBounds(), Origin, radius_sq))
 				{
-					cell->ForEachElement(grid, [&](const ElementId id, const ElementType& element)
-					{
-						if (GridSemantics::ElementOverlapsSphere(element, m_origin, radius))
-						{
-							func(id, element);
-						}
-					});
+					cell->ForEachElement(grid, scan_element);
 				}
 			}
 		}
 
-		template<typename IterFunc>
-		void uncached_each(const TSpatialGrid<GridSemantics>& grid, IterFunc&& func) const
+		template<typename F>
+		void UncachedEach(const TSpatialGrid<Semantics>& grid, F&& func) const
 		{
-			using GridCell    = typename TSpatialGrid<GridSemantics>::Cell;
-			using ElementType = typename TSpatialGrid<GridSemantics>::ElementData;
+			if (!Query) { return; }
 			
-			const double radius = m_query->m_radius;
+			const double radius = Query->Radius;
 			const double radius_sq = radius * radius;
-			const int32 bounds = FMath::RoundToInt32(radius / GridSemantics::CellSize) + 1;
-			const CellIndex offset = grid.LocationToCoordinates(m_origin);
-			const CellRange cell_range(bounds);
+			const CellRange cell_range(FMath::RoundToInt32(radius / Semantics::CellSize) + 1);
+			const CellIndex offset = grid.LocationToCoordinates(Origin);
 
+			auto scan_element = [this, radius, func=std::forward<F>(func)](const ElementId id, const Element& element)
+			{
+				if (Semantics::ElementOverlapsSphere(element, Origin, radius))
+				{
+					func(id, element);
+				}
+			};
+			
+			auto scan_cell = [this, &grid, &scan_element, radius_sq](const Cell& cell)
+			{
+				if (BoxIntersectsSphereRadiusSq(cell.GetBounds(), Origin, radius_sq))
+				{
+					cell.ForEachElement(grid, scan_element);
+				}	
+			};
+			
 			if (cell_range.Count() > grid.NumCells())
 			{
-				grid.for_each_cell([&](const GridCell& cell)
-				{
-					if (BoxIntersectsSphereRadiusSq(cell.GetBounds(), m_origin, radius_sq))
-					{
-						cell.ForEachElement(grid, [&](const ElementId id, const ElementType& element)
-						{
-							if(GridSemantics::ElementOverlapsSphere(element, m_origin, radius))
-							{
-								func(id, element);
-							}
-						});
-					}
-				});
-
-				return;
+				grid.for_each_cell(scan_cell);
 			}
-
-			cell_range.ForEach([&](const CellIndex& cell_coord)
+			else
 			{
-				const GridCell* cell = grid.GetCell(cell_coord + offset);
-				
-				if (cell && BoxIntersectsSphereRadiusSq(cell->GetBounds(), m_origin, radius_sq))
+				cell_range.ForEach([&](const CellIndex& cell_coord)
 				{
-					cell->ForEachElement(grid, [&](const ElementId id, const ElementType& element)
-					{
-						if (GridSemantics::ElementOverlapsSphere(element, m_origin, radius))
-						{
-							func(id, element);
-						}
-					});
-				}
-			});
+					grid.GetCell(cell_coord + offset, scan_cell);
+				});
+			}
 		}
 	};
 	
-	template<typename GridSemantics, EQueryCacheType CacheType>
+	template<typename Semantics, EQueryCacheType CacheType>
 	struct TQuery
 	{
+		using Grid    = TSpatialGrid<Semantics>;
+		using Cell    = typename Grid::Cell;
+		using Element = typename Grid::Element;
+
+		
 		TQuery() = default;
 		
-		TQuery(const double radius) : m_radius(radius) {}
+		explicit TQuery(const double radius) : Radius(radius) {}
 		
 		TQuery(TQuery&& other)
 		{
-			m_radius = other.m_radius;
-			m_inner_cells = MoveTemp(other.m_inner_cells);
-			m_edge_cells = MoveTemp(other.m_edge_cells);
-			m_outer_cells = MoveTemp(other.m_outer_cells);
+			Radius = other.Radius;
+			InnerCells = MoveTemp(other.InnerCells);
+			EdgeCells  = MoveTemp(other.EdgeCells);
+			OuterCells = MoveTemp(other.OuterCells);
 		}
 		
-		FORCEINLINE TQueryIter<GridSemantics, CacheType> set_origin(const FVector& location) const
+		TQueryIter<Semantics, CacheType> SetOrigin(const FVector& origin) const
 		{
-			return TQueryIter<GridSemantics, CacheType>(this, location);
+			return TQueryIter<Semantics, CacheType>(this, origin);
 		}
 
-		FORCEINLINE int32 cell_count() const
+		int32 GetCellCount() const
 		{
-			if constexpr (CacheType == EQueryCacheType::Cached)
-			{
-				return m_inner_cells.Num() + m_edge_cells.Num() + m_outer_cells.Num();
-			}
-			else
-			{
-				const int32 bounds = FMath::RoundToInt32(m_radius / GridSemantics::CellSize) + 1;
-				return FMath::Cube((bounds * 2) + 1);
-			}
+			return CellCount;
 		}
 
 	private:
-		double m_radius = 0;
-		
-		TArray<CellIndex> m_inner_cells;
-		TArray<CellIndex> m_edge_cells;
-		TArray<CellIndex> m_outer_cells;
-
-		friend struct TQueryIter<GridSemantics, CacheType>;
-		friend struct TQueryBuilder<GridSemantics>;
+		double Radius = 0;
+		int32 CellCount = 0;
+		TArray<CellIndex> InnerCells;
+		TArray<CellIndex> EdgeCells;
+		TArray<CellIndex> OuterCells;
+		friend struct TQueryIter<Semantics, CacheType>;
+		friend struct TQueryBuilder<Semantics>;
 	};
 
-	template<typename GridSemantics>
+	template<typename Semantics>
 	struct TQueryBuilder
 	{
 		using Self = TQueryBuilder;
 		
-		Self& radius(const double radius)
+		Self& SetRadius(const double radius)
 		{
-			m_shape = EQueryShape::Sphere;
-			m_radius = radius;
+			Shape = EQueryShape::Sphere;
+			Radius = radius;
 			return *this;
 		}
 
-		Self& box_extent(const FVector& extent)
+		Self& SetBoxExtent(const FVector& extent)
 		{
-			m_shape = EQueryShape::Box;
-			m_extents = extent;
+			Shape = EQueryShape::Box;
+			Extents = extent;
 			return *this;
 		}
 
 		template<EQueryCacheType CacheType>
-		TQuery<GridSemantics, CacheType> build()
+		TQuery<Semantics, CacheType> Build()
 		{
 			if constexpr(CacheType == EQueryCacheType::Cached)
 			{
-				switch (m_shape)
+				switch (Shape)
 				{
 				case EQueryShape::Box: return {};
-				case EQueryShape::Sphere: return build_sphere_query();
+				case EQueryShape::Sphere: return BuildSphere();
+				default: return {};
 				}
 			}
-
-			return TQuery<GridSemantics, CacheType>(m_radius);
+			else
+			{
+				return TQuery<Semantics, EQueryCacheType::UnCached>(Radius);
+			}
 		}
 		
 	private:
-		EQueryShape m_shape = EQueryShape::Sphere;
-		double m_radius = 0;
-		FVector m_extents = FVector(0, 0, 0);
+		EQueryShape Shape = EQueryShape::Sphere;
+		double Radius = 0;
+		FVector Extents = FVector(0, 0, 0);
 		
-		TQuery<GridSemantics, EQueryCacheType::Cached> build_sphere_query()
+		TQuery<Semantics, EQueryCacheType::Cached> BuildSphere()
 		{
-			TQuery<GridSemantics, EQueryCacheType::Cached> query(m_radius);
+			TQuery<Semantics, EQueryCacheType::Cached> query(Radius);
 			
-			const int32 bounds = FMath::RoundToInt32(m_radius / GridSemantics::CellSize) + 1;
-			const FVector cell_extent = FVector(SpatialGrid::HalfCellSize<GridSemantics>());
+			const int32 bounds = FMath::RoundToInt32(Radius / Semantics::CellSize) + 1;
+			constexpr FVector cell_extent = SpatialGrid::CellExtent<Semantics>();
 			// Adjust radius to account for worst-case sphere center position
-			const double effective_radius_sq = FMath::Square(m_radius - SpatialGrid::half_diagonal<GridSemantics>());
+			const double effective_radius_sq = FMath::Square(Radius - SpatialGrid::HalfDiagonal<Semantics>());
 			
 			CellRange(bounds).ForEach([&](const CellIndex& index)
 			{
-				const FVector cell_center(index * GridSemantics::CellSize);
+				const FVector cell_center(index * Semantics::CellSize);
 		
 				// For each cell, select the corner coordinate that's furthest from origin
-				FVector farthest_point;
-				farthest_point.X = 0. < cell_center.X ? cell_center.X + cell_extent.X : cell_center.X - cell_extent.X;
-				farthest_point.Y = 0. < cell_center.Y ? cell_center.Y + cell_extent.Y : cell_center.Y - cell_extent.Y;
-				farthest_point.Z = 0. < cell_center.Z ? cell_center.Z + cell_extent.Z : cell_center.Z - cell_extent.Z;
+				FVector farthest;
+				farthest.X = 0. < cell_center.X ? cell_center.X + cell_extent.X : cell_center.X - cell_extent.X;
+				farthest.Y = 0. < cell_center.Y ? cell_center.Y + cell_extent.Y : cell_center.Y - cell_extent.Y;
+				farthest.Z = 0. < cell_center.Z ? cell_center.Z + cell_extent.Z : cell_center.Z - cell_extent.Z;
 				
-				if (farthest_point.SizeSquared() <= effective_radius_sq)
+				if (farthest.SizeSquared() <= effective_radius_sq)
 				{
-					query.m_inner_cells.Add(index);
+					query.InnerCells.Add(index);
 				}
 				else if (FMath::Abs(index.X) < bounds && FMath::Abs(index.Y) < bounds && FMath::Abs(index.Z) < bounds)
 				{
-					query.m_edge_cells.Add(index);
+					query.EdgeCells.Add(index);
 				}
 				else
 				{
-					query.m_outer_cells.Add(index);
+					query.OuterCells.Add(index);
 				}
 			});
+
+			query.CellCount = query.InnerCells.Num() + query.EdgeCells.Num() + query.OuterCells.Num();
 			
 			return MoveTemp(query);
 		}

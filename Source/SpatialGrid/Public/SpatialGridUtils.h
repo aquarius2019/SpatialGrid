@@ -58,7 +58,7 @@ namespace SpatialGrid
 	}
 
 	template<typename GridSemantics>
-	static constexpr double half_diagonal()
+	static constexpr double HalfDiagonal()
 	{
 		return HalfCellSize<GridSemantics>() * FMath::Sqrt(3.0);
 	}
@@ -225,16 +225,6 @@ namespace SpatialGrid
 		return true;
 	}
 
-	static std::optional<FVector> LineBoxHitPoint(const FBox& box, const FVector& start, const FVector& end,
-		const FVector& dir, const FVector& inv_dir)
-	{
-		if (FVector hit; LineBoxHitPoint(box, start, end, dir, inv_dir, hit))
-		{
-			return hit;
-		}
-		return std::nullopt;
-	}
-
 	static bool LineSphereHitPoint(const FVector& start, const FVector& end_, const FVector& dir,
 		const FVector& sphere_origin, const double sphere_radius, FVector& out_hit)
 	{
@@ -264,17 +254,5 @@ namespace SpatialGrid
 
 		out_hit = start + (dir * time);
 		return true;
-	}
-
-	
-	// returns the intersection point if the line intersects 
-	static std::optional<FVector> LineSphereHitPoint(const FVector& start, const FVector& end, const FVector& dir,
-		const FVector& sphere_origin, const double sphere_radius)
-	{
-		if (FVector out_hit; LineSphereHitPoint(start, end, dir, sphere_origin, sphere_radius, out_hit))
-		{
-			return out_hit;
-		}
-		return std::nullopt;
 	}
 }

@@ -41,11 +41,11 @@ namespace SpatialGrid
 			}
 
 			template<typename F>
-			void ForEachElement(const TSpatialGrid& Grid, F&& Func) const
+			void ForEachElement(const TSpatialGrid& grid, F&& func) const
 			{
-				for (const ElementId& Id : Elements)
+				for (const ElementId& id : Elements)
 				{
-					Grid.Elements.ApplyAt(Id, std::forward<F>(Func));
+					grid.Elements.ApplyAt(id, std::forward<F>(func));
 				}
 			}
 			
